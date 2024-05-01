@@ -5263,15 +5263,6 @@ public:
    */
   inline void SetRangeReadings(const RangeReadingsVector & rRangeReadings)
   {
-    // ignore for now! XXXMAE BUGUBUG 05/21/2010 << TODO(lucbettaieb): What the heck is this??
-    // if (rRangeReadings.size() != GetNumberOfRangeReadings())
-    // {
-    //   std::stringstream error;
-    //   error << "Given number of readings (" << rRangeReadings.size()
-    //         << ") does not match expected number of range finder ("
-    //         << GetNumberOfRangeReadings() << ")";
-    //   throw Exception(error.str());
-    // }
 
     if (!rRangeReadings.empty()) {
       if (rRangeReadings.size() != m_NumberOfRangeReadings) {
@@ -6136,57 +6127,70 @@ protected:
     Update();
   }
 
-  /**
+  /**                                           ================= ICI FILTRAGE POSSIBLE ===================                                             **
    * Adds the scan's information to this grid's counters (optionally
    * update the grid's cells' occupancy status)
    * @param pScan
    * @param doUpdate whether to update the grid's cell's occupancy status
    * @return returns false if an endpoint fell off the grid, otherwise true
    */
-  virtual kt_bool AddScan(LocalizedRangeScan * pScan, kt_bool doUpdate = false)
-  {
-    LaserRangeFinder * laserRangeFinder = pScan->GetLaserRangeFinder();
+  virtual kt_bool AddScan(LocalizedRangeScan* pScan, kt_bool doUpdate = false)
+{
+    LaserRangeFinder* laserRangeFinder = pScan->GetLaserRangeFinder();
     kt_double rangeThreshold = laserRangeFinder->GetRangeThreshold();
     kt_double maxRange = laserRangeFinder->GetMaximumRange();
     kt_double minRange = laserRangeFinder->GetMinimumRange();
 
+    // Define boundaries of the box
+    kt_double boxMinX = 0.0; // Example minimum x-coordinate of the box
+    kt_double boxMaxX = 2.0; // Example maximum x-coordinate of the box
+    kt_double boxMinY = 0.0; // Example minimum y-coordinate of the box
+    kt_double boxMaxY = 3.0; // Example maximum y-coordinate of the box
+
     Vector2<kt_double> scanPosition = pScan->GetSensorPose().GetPosition();
-    // get scan point readings
-    const PointVectorDouble & rPointReadings = pScan->GetPointReadings(false);
+    // Get scan point readings
+    const PointVectorDouble& rPointReadings = pScan->GetPointReadings(false);
 
     kt_bool isAllInMap = true;
 
-    // draw lines from scan position to all point readings
+    // Draw lines from scan position to all point readings
     int pointIndex = 0;
     const_forEachAs(PointVectorDouble, &rPointReadings, pointsIter)
     {
-      Vector2<kt_double> point = *pointsIter;
-      kt_double rangeReading = pScan->GetRangeReadings()[pointIndex];
-      kt_bool isEndPointValid = rangeReading < (rangeThreshold - KT_TOLERANCE);
+        Vector2<kt_double> point = *pointsIter;
+        kt_double rangeReading = pScan->GetRangeReadings()[pointIndex];
+        kt_bool isEndPointValid = rangeReading < (rangeThreshold - KT_TOLERANCE);
 
-      if (rangeReading <= minRange || rangeReading >= maxRange || std::isnan(rangeReading)) {
-        // ignore these readings
+        // Check if the point is within the defined box
+        if (point.GetX() < boxMinX || point.GetX() > boxMaxX || point.GetY() < boxMinY || point.GetY() > boxMaxY) {
+            // Ignore points outside of the box
+            pointIndex++;
+            continue;
+        }
+        else if (rangeReading <= minRange || rangeReading >= maxRange || std::isnan(rangeReading)) {
+            // Ignore these readings
+            pointIndex++;
+            continue;
+        }
+        else if (rangeReading >= rangeThreshold) {
+            // Trace up to range reading
+            kt_double ratio = rangeThreshold / rangeReading;
+            kt_double dx = point.GetX() - scanPosition.GetX();
+            kt_double dy = point.GetY() - scanPosition.GetY();
+            point.SetX(scanPosition.GetX() + ratio * dx);
+            point.SetY(scanPosition.GetY() + ratio * dy);
+        }
+
+        kt_bool isInMap = RayTrace(scanPosition, point, isEndPointValid, doUpdate);
+        if (!isInMap) {
+            isAllInMap = false;
+        }
+
         pointIndex++;
-        continue;
-      } else if (rangeReading >= rangeThreshold) {
-        // trace up to range reading
-        kt_double ratio = rangeThreshold / rangeReading;
-        kt_double dx = point.GetX() - scanPosition.GetX();
-        kt_double dy = point.GetY() - scanPosition.GetY();
-        point.SetX(scanPosition.GetX() + ratio * dx);
-        point.SetY(scanPosition.GetY() + ratio * dy);
-      }
-
-      kt_bool isInMap = RayTrace(scanPosition, point, isEndPointValid, doUpdate);
-      if (!isInMap) {
-        isAllInMap = false;
-      }
-
-      pointIndex++;
     }
 
     return isAllInMap;
-  }
+}
 
   /**
    * Traces a beam from the start position to the end position marking
@@ -6254,7 +6258,8 @@ protected:
 
   /**
    * Update the grid based on the values in m_pCellHitsCnt and m_pCellPassCnt
-   */
+                                        =============== ICI POUR CHANGER LA TAILLE DE LA GRILLE =================
+  */ 
   virtual void Update()
   {
     assert(m_pCellPassCnt != NULL && m_pCellHitsCnt != NULL);
